@@ -1,0 +1,173 @@
+DFIS STARTUP COMMANDS - WINDOWS
+================================
+
+FIRST-TIME INSTALLATION ON ANOTHER WINDOWS MACHINE
+===================================================
+
+1. Clone the project and enter the folder:
+
+git clone https://github.com/KunalDharme/DFIS.git
+Set-Location ".\DFIS"
+
+2. Create the Python virtual environment:
+
+py -3.12 -m venv venv
+.\venv\Scripts\Activate.ps1
+
+If PowerShell blocks activation, use this for the current terminal only:
+
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.\venv\Scripts\Activate.ps1
+
+3. Install the DFIS backend dependencies:
+
+python -m pip install --upgrade pip
+python -m pip install -r .\backend\requirements.txt
+
+4. Install the OSINT command-line tools:
+
+python -m pip install --user pipx
+python -m pipx ensurepath
+
+Close and reopen PowerShell after ensurepath, then run:
+
+pipx install holehe
+pipx install maigret
+pipx install sherlock-project
+pipx install mailaccess
+pipx inject mailaccess greenlet
+
+If pipx commands are not found, close and reopen PowerShell again.
+
+5. Install and prepare Ollama:
+
+ollama pull llama3.1:8b
+
+6. Create the local configuration file:
+
+Copy-Item ".env.example" ".env"
+
+For native Windows mode, verify .env contains:
+
+LLM_PROVIDER=ollama
+LLM_MODEL=llama3.1:8b
+LLM_BASE_URL=http://127.0.0.1:11434/v1
+DEV_SHOW_OTP=1
+
+DEV_SHOW_OTP=1 is for local demonstration only. Keep the application private.
+
+After installation, use the startup commands below.
+
+
+RECOMMENDED ONE-COMMAND START
+
+Open PowerShell:
+
+Set-Location "C:\Users\Kunal\OneDrive\Desktop\PROGRAMS\dfis"
+
+if (-not (Test-NetConnection 127.0.0.1 -Port 11434 -InformationLevel Quiet)) {
+    Start-Process -FilePath "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" `
+        -ArgumentList "serve" `
+        -WindowStyle Minimized
+}
+
+Start-Sleep -Seconds 3
+curl.exe http://127.0.0.1:11434/api/tags
+
+powershell -ExecutionPolicy Bypass -File ".\run_dfis.ps1"
+
+Open the application:
+
+http://127.0.0.1:8000
+
+
+WHAT THIS STARTS
+================
+
+- Ollama on port 11434
+- DFIS web application and API on port 8000
+- FastAPI/Uvicorn backend
+- All installed OSINT command-line tools when a scan runs
+- MailAccess automatically during a scan on port 8001
+
+The OSINT tools do not need separate servers. DFIS launches them on demand.
+
+
+VERIFY ALL COMPONENTS
+=====================
+
+Open a second PowerShell window while DFIS is running:
+
+Set-Location "C:\Users\Kunal\OneDrive\Desktop\PROGRAMS\dfis"
+
+# DFIS health
+curl.exe http://127.0.0.1:8000/api/health
+
+# Ollama health and installed models
+curl.exe http://127.0.0.1:11434/api/tags
+
+# Check installed OSINT tools
+Get-Command holehe
+Get-Command sherlock
+Get-Command maigret
+Get-Command mailaccess
+
+# Check DFIS, MailAccess, and Ollama ports
+Get-NetTCPConnection -State Listen |
+    Where-Object {$_.LocalPort -in 8000,8001,11434} |
+    Select-Object LocalAddress,LocalPort,OwningProcess
+
+
+EXPECTED PORTS
+==============
+
+8000  DFIS web application and API
+8001  MailAccess, started during a scan
+11434 Ollama
+
+
+MANUAL TWO-TERMINAL START
+=========================
+
+PowerShell window 1 - Ollama:
+
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" serve
+
+If the Ollama desktop app is already running, skip this step.
+
+PowerShell window 2 - DFIS:
+
+Set-Location "C:\Users\Kunal\OneDrive\Desktop\PROGRAMS\dfis"
+
+.\venv\Scripts\python.exe -m uvicorn `
+    --app-dir ".\backend" `
+    main:app `
+    --host 127.0.0.1 `
+    --port 8000
+
+Then open:
+
+http://127.0.0.1:8000
+
+
+STOP SERVICES
+=============
+
+Stop DFIS by pressing Ctrl+C in the DFIS terminal.
+
+If Ollama was started manually and should also be stopped:
+
+Get-Process ollama | Stop-Process
+
+
+IMPORTANT CONFIGURATION
+=======================
+
+For native Windows mode, the project .env should contain:
+
+LLM_PROVIDER=ollama
+LLM_MODEL=llama3.1:8b
+LLM_BASE_URL=http://127.0.0.1:11434/v1
+
+Do not run the native Windows launcher and Docker DFIS at the same time,
+because both use port 8000.
