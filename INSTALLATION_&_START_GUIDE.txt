@@ -59,6 +59,28 @@ DEV_SHOW_OTP=1 is for local demonstration only. Keep the application private.
 After installation, use the startup commands below.
 
 
+CHECK AND RESTART AN EXISTING DFIS INSTANCE
+===========================================
+
+Run this before starting DFIS again:
+
+Get-NetTCPConnection -State Listen -LocalPort 8000,11434 |
+    Select-Object LocalPort,OwningProcess
+
+If port 8000 is listed, DFIS is already running. Stop only the process
+using port 8000 before restarting:
+
+$dfisConnection = Get-NetTCPConnection -State Listen -LocalPort 8000 -ErrorAction SilentlyContinue
+if ($dfisConnection) {
+    Stop-Process -Id $dfisConnection.OwningProcess
+    Start-Sleep -Seconds 2
+}
+
+Do not stop the process using port 11434. That is Ollama, and it can
+continue running. The startup command below starts Ollama only when it
+is not already available.
+
+
 RECOMMENDED ONE-COMMAND START
 
 Open PowerShell:
