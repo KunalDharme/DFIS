@@ -6,13 +6,16 @@ const colour=r=>r>=70?'var(--bad)':r>=45?'var(--warn)':'var(--ok)';
 const level=r=>r>=76?'Critical risk':r>=51?'High risk':r>=26?'Moderate risk':'Low risk';
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(async r=>{const j=await r.json();if(!r.ok)throw new Error(j.detail||'Request failed');return j});
 
-function Header({theme,onTheme}){
+function Header({theme,onTheme,onPremium}){
   return h('header',{className:'hdr'},h('div',{className:'wrap'},
     h('a',{className:'brand',href:'/','aria-label':'DFIS home'},
       h('span',{className:'logo'},h('svg',{viewBox:'0 0 24 24'},h('circle',{cx:11,cy:11,r:6}),h('path',{d:'M16 16l5 5'}))),'DFIS'),
     h('nav',{className:'nav','aria-label':'Primary'},h('a',{href:'#modules'},'Modules'),h('a',{href:'#why'},'Why DFIS')),
     h('span',{className:'sp'}),
     h('span',{className:'live'},h('i'),'System online'),
+    h('button',{className:'upgrade',onClick:onPremium,'aria-label':'Upgrade to Pro'},
+      h('svg',{viewBox:'0 0 24 24','aria-hidden':true},h('path',{d:'m12 3 2.35 4.76 5.25.76-3.8 3.7.9 5.23L12 15l-4.7 2.45.9-5.23-3.8-3.7 5.25-.76L12 3Z'})),
+      h('span',{className:'upgrade-label'},'Upgrade to Pro')),
     h('button',{className:'btn sec sm',onClick:onTheme,'aria-label':theme==='dark'?'Switch to light theme':'Switch to dark theme'},theme==='dark'?'Light mode':'Dark mode')));
 }
 
@@ -129,6 +132,37 @@ function DeleteModal({a,email,name,status,steps,onStatus,onClose}){
     h('div',{style:{marginTop:20}},h('button',{className:'btn sec',onClick:onClose},'Close'))));
 }
 
+function PremiumPage({onBack}){
+  const comparisons=[
+    ['Email exposure scan','Core checks','Expanded coverage'],
+    ['Username-based search','—','Planned Pro feature'],
+    ['Domain intelligence','Essential signals','Pre-visit domain safety'],
+    ['Risk assessment','Rule-based score','Deeper evidence correlation'],
+    ['Results and guidance','Live dashboard','Priority insights and remediation'],
+    ['Scan history and monitoring','—','Planned Pro feature']
+  ];
+  const benefits=[
+    ['✦','Search beyond email','Connect usernames and aliases to a wider public footprint.'],
+    ['◈','Check before you visit','Review domain reputation, redirects, certificates, and risk signals first.'],
+    ['↗','More intelligence sources','Add carefully researched tools as DFIS Pro coverage grows.'],
+    ['✓','Clearer decisions','See evidence, confidence, and practical next steps in one place.']
+  ];
+  return h('main',{className:'premium-page'},
+    h('section',{className:'premium-hero wrap'},
+      h('button',{className:'premium-back',onClick:onBack},'← Back to DFIS'),
+      h('div',{className:'premium-hero-content'},
+        h('div',{className:'premium-badge'},h('span',{className:'premium-icon','aria-hidden':true},'✦'),'DFIS PREMIUM'),
+        h('h1',null,'Upgrade your exposure intelligence'),
+        h('p',null,'Go beyond a single scan with deeper identity coverage, domain safety signals, and clearer guidance for reducing your digital footprint.'),
+        h('div',{className:'premium-hero-actions'},h('button',{className:'btn premium-cta',onClick:onBack},'Preview dashboard'),h('span',null,'Premium preview · Coming soon')))),
+    h('section',{className:'wrap premium-section'},h('div',{className:'premium-section-heading'},h('div',null,h('p',{className:'premium-kicker'},'WHY PRO'),h('h2',null,'More context. Better decisions.'),h('p',{className:'mute'},'A planned premium experience designed around trustworthy, explainable intelligence.'))),
+      h('div',{className:'premium-benefits'},benefits.map(([icon,title,text])=>h('article',{className:'premium-benefit',key:title},h('span',{className:'benefit-icon','aria-hidden':true},icon),h('h3',null,title),h('p',null,text))))),
+    h('section',{className:'wrap premium-section'},h('div',{className:'premium-section-heading'},h('div',null,h('p',{className:'premium-kicker'},'FREE VS PRO'),h('h2',null,'Choose the level of coverage you need'))),
+      h('div',{className:'premium-table-wrap'},h('table',{className:'premium-table'},h('thead',null,h('tr',null,h('th',null,'Capability'),h('th',null,'DFIS Free'),h('th',{className:'pro-column'},'DFIS Pro'))),h('tbody',null,comparisons.map(([feature,free,pro])=>h('tr',{key:feature},h('th',null,feature),h('td',null,free),h('td',{className:'pro-column'},h('span',{className:'pro-value'},pro)))))))),
+    h('section',{className:'wrap premium-section'},h('div',{className:'premium-price-card'},h('div',null,h('p',{className:'premium-kicker'},'ILLUSTRATIVE EXAMPLE'),h('h2',null,'Premium, made accessible.'),h('p',null,'For demonstration purposes, a future plan could be offered at an example price of only ₹500 per year.'),h('small',null,'This is only a project concept. No payment or subscription is active yet.')),h('div',{className:'premium-price'},h('strong',null,'₹500'),h('span',null,'/ year')))),
+    h('section',{className:'wrap premium-note'},h('p',null,'DFIS Pro is planned for a future release. Current scanning, verification, and dashboard features remain available as before.')));
+}
+
 function Marketing(){
   const BR=[781,1093,1300,1473,1632,1802,2116,2724,3205,3500,3900],mx=4000;
   const cmp=[['Breach lookup','Y','N','Y'],['Username enumeration','N','Y','Y'],['Platform presence','N','Y','Partial'],['Risk scoring','N','N','N'],['Remediation','N','N','N'],['Unified dashboard','N','N','N'],['Non-technical users','Y','N','N']];
@@ -167,6 +201,7 @@ function App(){
   const [theme,setTheme]=useState(document.documentElement.dataset.theme||'light');
   const [logs,setLogs]=useState([]),[chips,setChips]=useState({}),[modules,setModules]=useState([]),[running,setRunning]=useState(false);
   const [result,setResult]=useState(null),[who,setWho]=useState({email:'',name:''});
+  const [premiumPage,setPremiumPage]=useState(false);
   const liveResultShown=useRef(false);
   const chipsRef=useRef({});chipsRef.current=chips;
   const log=(t,k='')=>setLogs(l=>[...l,{t,k}]);
@@ -194,7 +229,8 @@ function App(){
       else if(d.type==='result'){setResult({...d,partial:false});setTimeout(()=>document.getElementById('results')?.scrollIntoView({behavior:'smooth'}),50)}};
     ws.onclose=()=>{setRunning(false);log('connection closed')};
     ws.onerror=()=>log('could not reach the scan server','err')};
-  return h(React.Fragment,null,h(Header,{theme,onTheme:toggle}),
+  return h(React.Fragment,null,h(Header,{theme,onTheme:toggle,onPremium:()=>setPremiumPage(true)}),
+    premiumPage?h(PremiumPage,{onBack:()=>setPremiumPage(false)}):h(React.Fragment,null,
     h('main',{className:'wrap'},
       h('section',{className:'hero'},
         h('div',null,h('div',{className:'eyebrow'},h('span'),'Privacy intelligence platform'),h('h1',null,'Find the accounts you forgot you made.'),
@@ -204,7 +240,7 @@ function App(){
         h(Console,{logs,chips,modules,running})),
       result&&h(Results,{d:result,email:who.email,name:who.name}),
       h(Marketing)),
-    h(Footer));
+    h(Footer)));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(h(App));
 })();
