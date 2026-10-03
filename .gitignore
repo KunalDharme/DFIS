@@ -1,0 +1,46 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+
+# Generated reports and runtime output
+backend/reports/*
+!backend/reports/.gitkeep
+*.log
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Frontend dependencies and build output
+node_modules/
+coverage/
+
+# Local Docker and tool state
+docker-compose.override.yml
+.docker/
+
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
