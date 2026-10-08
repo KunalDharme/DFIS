@@ -1,5 +1,5 @@
 /* DFIS front end: React 18 (UMD), no build step. Backend contract unchanged:
-   GET /api/health, POST /api/otp/request, POST /api/otp/verify, WS /ws/scan */
+   GET /api/health, POST /api/otp/request, POST /api/otp/verify, POST /api/pro/domain-check, WS /ws/scan */
 (function(){
 const {useState,useEffect,useRef}=React, h=React.createElement;
 const colour=r=>r>=70?'var(--bad)':r>=45?'var(--warn)':'var(--ok)';
@@ -43,6 +43,61 @@ function ScanForm({onVerified,onCode}){
       h('div',{style:{height:16}}),
       h('button',{className:'btn full',disabled:busy},busy?'Verifying…':'Verify and scan')),
     h('div',{className:'err',role:'alert'},err));
+}
+
+function DomainSafety(){
+  const [domain,setDomain]=useState(''),[result,setResult]=useState(null),[err,setErr]=useState(''),[busy,setBusy]=useState(false);
+  const check=async e=>{e.preventDefault();setErr('');setResult(null);setBusy(true);
+    try{setResult(await post('/api/pro/domain-check',{domain}))}catch(x){setErr(x.message)}setBusy(false)};
+  return h('section',{className:'panel domain-safety',id:'domain-safety'},
+    h('div',{className:'premium-kicker'},'PRO PREVIEW · FREE TESTING'),
+    h('h2',null,'Check a domain before you visit'),
+    h('p',{className:'sub'},'Review HTTPS, redirects, SPF, and DMARC signals without changing your normal email scan.'),
+    h('form',{className:'domain-form',onSubmit:check},
+      h('label',{className:'f',htmlFor:'domain-check'},'Domain name'),
+      h('div',{className:'domain-input-row'},h('input',{className:'in',id:'domain-check',type:'text',placeholder:'example.com',required:true,value:domain,onChange:e=>setDomain(e.target.value)}),
+        h('button',{className:'btn',disabled:busy},busy?'Checking…':'Check domain')),
+      h('div',{className:'err',role:'alert'},err)),
+    result&&h('div',{className:'domain-result'},
+      h('div',{className:'domain-verdict '+result.level.toLowerCase()},h('strong',null,result.verdict),h('span',null,result.domain+' · '+result.level+' risk · '+result.score+'/100')),
+      h('p',{className:'domain-recommendation'},result.recommendation),
+      h('div',{className:'domain-findings'},result.findings.map((f,i)=>h('div',{className:'domain-finding',key:i},h('span',null,f.label),h('strong',{className:f.status},f.value)))),
+      h('p',{className:'small mute'},result.disclaimer)));
+}
+
+function ExposureSource({source}){
+  const escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const renderValue=([field,value])=>h('div',{className:'exposure-value',key:field},
+    h('span',null,field),h('strong',null,value));
+  const renderSample=(sample,index)=>h('div',{className:'exposure-sample',key:index},
+    Object.entries(sample).map(renderValue));
+  return h('div',{className:'exposure-source'},
+    h('div',{className:'domain-finding'},h('span',null,source.name),h('strong',null,source.records+' record'+(source.records===1?'':'s'))),
+    source.info&&h('p',{className:'small mute'},source.info),
+    source.fields.length>0&&h('div',{className:'exposure-fields'},h('strong',null,'Returned fields'),h('span',null,source.fields.join(' · '))),
+    source.samples.length>0&&h('div',{className:'exposure-samples'},source.samples.map(renderSample)));
+}
+
+function ExposureCheck({kind,label,placeholder}){
+  const [query,setQuery]=useState(''),[result,setResult]=useState(null),[err,setErr]=useState(''),[busy,setBusy]=useState(false);
+  const check=async e=>{e.preventDefault();setErr('');setResult(null);setBusy(true);
+    try{setResult(await post('/api/pro/exposure/'+kind,{query}))}catch(x){setErr(x.message)}setBusy(false)};
+  const download=()=>{const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const sources=result.sources.map(source=>`<article class="source"><div class="source-head"><h2>${esc(source.name)}</h2><span>${source.records} record${source.records===1?'':'s'}</span></div>${source.info?`<p>${esc(source.info)}</p>`:''}<h3>Returned fields</h3><div class="fields">${source.fields.map(field=>`<span>${esc(field)}</span>`).join('')}</div>${source.samples.map(sample=>`<div class="sample">${Object.entries(sample).map(([field,value])=>`<div><b>${esc(field)}</b><span>${esc(value)}</span></div>`).join('')}</div>`).join('')}</article>`).join('');
+    const html=`<!doctype html><html><head><meta charset="utf-8"><title>DFIS redacted exposure report</title><style>body{font:15px/1.6 system-ui,sans-serif;background:#f3f5f8;color:#0e1b2c;max-width:900px;margin:0 auto;padding:32px}header,.source{background:#fff;border:1px solid #dde3ec;border-radius:12px;padding:22px;margin-bottom:16px}h1{margin:0 0 6px;color:#4338ca}h2{font-size:18px;margin:0}.muted,p{color:#5b6b80}.source-head{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #dde3ec;padding-bottom:10px}.source-head span{color:#7c3aed;font-weight:700}.source h3{font-size:12px;text-transform:uppercase;color:#5b6b80;letter-spacing:.06em;margin:16px 0 6px}.fields{display:flex;flex-wrap:wrap;gap:6px}.fields span{background:#e6ecfc;color:#1f4fd8;border-radius:999px;padding:3px 9px;font-size:12px}.sample{background:#f3f5f8;border-radius:8px;padding:10px;margin-top:10px}.sample div{display:grid;grid-template-columns:35% 1fr;gap:12px;padding:3px 0}.sample b{color:#5b6b80}.sample span{font-weight:600;overflow-wrap:anywhere}@media(max-width:600px){body{padding:16px}.sample div{grid-template-columns:1fr;gap:0}}</style></head><body><header><h1>DFIS redacted exposure report</h1><p>Query type: ${esc(kind)} · Query: ${esc(query)}</p><p class="muted">${esc(result.notice)}</p></header>${sources}</body></html>`;
+    const blob=new Blob([html],{type:'text/html;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='dfis-'+kind+'-exposure-redacted.html';a.click();URL.revokeObjectURL(url)};
+  return h('section',{className:'panel exposure-check'},
+    h('div',{className:'premium-kicker'},'PRO PREVIEW'),
+    h('h2',null,label),
+    h('p',{className:'sub'},'Check for exposure indicators across configured breach sources. Raw credentials and personal records are never displayed.'),
+    h('form',{onSubmit:check},h('label',{className:'f',htmlFor:'exposure-'+kind},kind==='email'?'Email address':'Mobile number'),
+      h('div',{className:'domain-input-row'},h('input',{className:'in',id:'exposure-'+kind,type:kind==='email'?'email':'tel',placeholder,required:true,value:query,onChange:e=>setQuery(e.target.value)}),
+        h('button',{className:'btn',disabled:busy},busy?'Checking…':'Check exposure')),
+      h('div',{className:'err',role:'alert'},err)),
+    result&&h('div',{className:'exposure-result'},
+      h('div',{className:'domain-verdict '+(result.found?'high':'low')},h('strong',null,result.found?'Exposure indicators found':'No results found'),h('span',null,result.source_count+' sources · '+result.record_count+' records')),
+      result.found&&h('div',{className:'exposure-sources'},result.sources.map((source,index)=>h(ExposureSource,{source,key:index}))),
+      h('div',{className:'exposure-result-footer'},h('p',{className:'small mute'},result.notice),h('button',{className:'btn sec sm download-btn',onClick:download},'Download HTML report'))));
 }
 
 function Console({logs,chips,modules,running}){
@@ -132,20 +187,21 @@ function DeleteModal({a,email,name,status,steps,onStatus,onClose}){
     h('div',{style:{marginTop:20}},h('button',{className:'btn sec',onClick:onClose},'Close'))));
 }
 
-function PremiumPage({onBack}){
+const PREMIUM_BENEFITS=[
+  ['✦','Search beyond email','Connect usernames and aliases to a wider public footprint.'],
+  ['◈','Check before you visit','Review domain reputation, redirects, certificates, and risk signals first.'],
+  ['↗','More intelligence sources','Add carefully researched tools as DFIS Pro coverage grows.'],
+  ['✓','Clearer decisions','See evidence, confidence, and practical next steps in one place.']
+];
+
+function PremiumPage({onBack,onStartTrial}){
   const comparisons=[
     ['Email exposure scan','Core checks','Expanded coverage'],
-    ['Username-based search','—','Planned Pro feature'],
+    ['Mobile number exposure','—','Planned Pro feature'],
     ['Domain intelligence','Essential signals','Pre-visit domain safety'],
     ['Risk assessment','Rule-based score','Deeper evidence correlation'],
     ['Results and guidance','Live dashboard','Priority insights and remediation'],
     ['Scan history and monitoring','—','Planned Pro feature']
-  ];
-  const benefits=[
-    ['✦','Search beyond email','Connect usernames and aliases to a wider public footprint.'],
-    ['◈','Check before you visit','Review domain reputation, redirects, certificates, and risk signals first.'],
-    ['↗','More intelligence sources','Add carefully researched tools as DFIS Pro coverage grows.'],
-    ['✓','Clearer decisions','See evidence, confidence, and practical next steps in one place.']
   ];
   return h('main',{className:'premium-page'},
     h('section',{className:'premium-hero wrap'},
@@ -156,11 +212,34 @@ function PremiumPage({onBack}){
         h('p',null,'Go beyond a single scan with deeper identity coverage, domain safety signals, and clearer guidance for reducing your digital footprint.'),
         h('div',{className:'premium-hero-actions'},h('button',{className:'btn premium-cta',onClick:onBack},'Preview dashboard'),h('span',null,'Premium preview · Coming soon')))),
     h('section',{className:'wrap premium-section'},h('div',{className:'premium-section-heading'},h('div',null,h('p',{className:'premium-kicker'},'WHY PRO'),h('h2',null,'More context. Better decisions.'),h('p',{className:'mute'},'A planned premium experience designed around trustworthy, explainable intelligence.'))),
-      h('div',{className:'premium-benefits'},benefits.map(([icon,title,text])=>h('article',{className:'premium-benefit',key:title},h('span',{className:'benefit-icon','aria-hidden':true},icon),h('h3',null,title),h('p',null,text))))),
+      h('div',{className:'premium-benefits'},PREMIUM_BENEFITS.map(([icon,title,text])=>h('article',{className:'premium-benefit',key:title},h('span',{className:'benefit-icon','aria-hidden':true},icon),h('h3',null,title),h('p',null,text))))),
     h('section',{className:'wrap premium-section'},h('div',{className:'premium-section-heading'},h('div',null,h('p',{className:'premium-kicker'},'FREE VS PRO'),h('h2',null,'Choose the level of coverage you need'))),
       h('div',{className:'premium-table-wrap'},h('table',{className:'premium-table'},h('thead',null,h('tr',null,h('th',null,'Capability'),h('th',null,'DFIS Free'),h('th',{className:'pro-column'},'DFIS Pro'))),h('tbody',null,comparisons.map(([feature,free,pro])=>h('tr',{key:feature},h('th',null,feature),h('td',null,free),h('td',{className:'pro-column'},h('span',{className:'pro-value'},pro)))))))),
-    h('section',{className:'wrap premium-section'},h('div',{className:'premium-price-card'},h('div',null,h('p',{className:'premium-kicker'},'ILLUSTRATIVE EXAMPLE'),h('h2',null,'Premium, made accessible.'),h('p',null,'For demonstration purposes, a future plan could be offered at an example price of only ₹500 per year.'),h('small',null,'This is only a project concept. No payment or subscription is active yet.')),h('div',{className:'premium-price'},h('strong',null,'₹500'),h('span',null,'/ year')))),
+    h('section',{className:'wrap premium-section'},h('div',{className:'premium-price-card'},h('div',null,h('p',{className:'premium-kicker'},'ILLUSTRATIVE EXAMPLE'),h('h2',null,'Premium, made accessible.'),h('p',null,'For demonstration purposes, a future plan could be offered at an example price of only ₹500 per year.'),h('small',null,'This is only a project concept. No payment or subscription is active yet.')),h('div',{className:'premium-price'},h('strong',null,'₹500'),h('span',null,'/ year'))),
+      h('div',{className:'premium-trial-action'},h('button',{className:'btn premium-cta',onClick:onStartTrial},'Use free trial'),h('small',null,'No payment required during development.'))),
     h('section',{className:'wrap premium-note'},h('p',null,'DFIS Pro is planned for a future release. Current scanning, verification, and dashboard features remain available as before.')));
+}
+
+function ProTrialPage({onBack}){
+  return h('main',{className:'premium-page pro-trial-page'},
+    h('section',{className:'premium-hero wrap'},
+      h('button',{className:'premium-back',onClick:onBack},'← Back to Pro overview'),
+      h('div',{className:'premium-hero-content'},
+        h('div',{className:'premium-badge'},h('span',{className:'premium-icon','aria-hidden':true},'✦'),'DFIS PRO PREVIEW'),
+        h('h1',null,'Your Pro trial is active'),
+        h('p',null,'You are currently using DFIS Pro at no cost while development is still in progress. Explore the preview features and share your feedback as the experience grows.'),
+        h('div',{className:'trial-notice'},h('strong',null,'Free trial active'),h('span',null,'No payment or subscription is required during development.')))),
+    h('section',{className:'wrap premium-section'},h(DomainSafety)),
+    h('section',{className:'wrap premium-section'},h(ExposureCheck,{kind:'email',label:'Advanced email exposure check',placeholder:'you@example.com'})),
+    h('section',{className:'wrap premium-section'},h(ExposureCheck,{kind:'phone',label:'Mobile number exposure check',placeholder:'+919876543210'})),
+    h('section',{className:'wrap premium-section'},
+      h('div',{className:'premium-section-heading'},h('div',null,h('p',{className:'premium-kicker'},'PRO BENEFITS'),h('h2',null,'More context. Better decisions.'),h('p',{className:'mute'},'Premium capabilities designed to make digital-footprint findings easier to understand and act on.'))),
+      h('div',{className:'premium-benefits'},PREMIUM_BENEFITS.map(([icon,title,text])=>h('article',{className:'premium-benefit',key:title},h('span',{className:'benefit-icon','aria-hidden':true},icon),h('h3',null,title),h('p',null,text))))),
+    h('section',{className:'wrap premium-section'},
+      h('div',{className:'premium-section-heading'},h('div',null,h('p',{className:'premium-kicker'},'AVAILABLE COVERAGE'),h('h2',null,'What Pro adds'))),
+      h('div',{className:'premium-table-wrap'},h('table',{className:'premium-table'},h('thead',null,h('tr',null,h('th',null,'Capability'),h('th',{className:'pro-column'},'DFIS Pro preview'))),h('tbody',null,
+        [['Pre-visit domain safety','HTTPS, redirects, SPF, DMARC, and risk signals'],['Advanced email exposure','Breach-source exposure indicators without raw records'],['Mobile number exposure','Phone-based exposure indicators without raw records'],['Deeper evidence correlation','More context for risk decisions'],['Priority guidance','Clearer remediation and next steps']].map(([feature,detail])=>h('tr',{key:feature},h('th',null,feature),h('td',{className:'pro-column'},h('span',{className:'pro-value'},detail)))))))),
+    h('section',{className:'wrap premium-note'},h('p',null,'This is a free development preview. Features may change as DFIS Pro is built and tested.')));
 }
 
 function Marketing(){
@@ -202,6 +281,7 @@ function App(){
   const [logs,setLogs]=useState([]),[chips,setChips]=useState({}),[modules,setModules]=useState([]),[running,setRunning]=useState(false);
   const [result,setResult]=useState(null),[who,setWho]=useState({email:'',name:''});
   const [premiumPage,setPremiumPage]=useState(false);
+  const [trialPage,setTrialPage]=useState(false);
   const liveResultShown=useRef(false);
   const chipsRef=useRef({});chipsRef.current=chips;
   const log=(t,k='')=>setLogs(l=>[...l,{t,k}]);
@@ -230,7 +310,7 @@ function App(){
     ws.onclose=()=>{setRunning(false);log('connection closed')};
     ws.onerror=()=>log('could not reach the scan server','err')};
   return h(React.Fragment,null,h(Header,{theme,onTheme:toggle,onPremium:()=>setPremiumPage(true)}),
-    premiumPage?h(PremiumPage,{onBack:()=>setPremiumPage(false)}):h(React.Fragment,null,
+    trialPage?h(ProTrialPage,{onBack:()=>setTrialPage(false)}):premiumPage?h(PremiumPage,{onBack:()=>setPremiumPage(false),onStartTrial:()=>{setPremiumPage(false);setTrialPage(true)}}):h(React.Fragment,null,
     h('main',{className:'wrap'},
       h('section',{className:'hero'},
         h('div',null,h('div',{className:'eyebrow'},h('span'),'Privacy intelligence platform'),h('h1',null,'Find the accounts you forgot you made.'),

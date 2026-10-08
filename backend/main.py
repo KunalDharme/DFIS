@@ -1,5 +1,6 @@
 """DFIS API. Run: uvicorn main:app --reload  (Python 3.11+)"""
 import asyncio, os, random, re, secrets, shutil, time
+import httpx
 
 
 def _load_env():  # reads .env itself, so Windows users don't have to set variables by hand
@@ -19,6 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import llm, modules as M, scoring as S
+import leakosint_provider as L
 
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 app = FastAPI(title="DFIS")
@@ -41,6 +43,38 @@ class OtpReq(BaseModel):
 class OtpVerify(BaseModel):
     email: str
     code: str
+
+
+class DomainCheck(BaseModel):
+    domain: str
+
+
+class ExposureCheck(BaseModel):
+    query: str
+
+
+@app.post("/api/pro/exposure/{kind}")
+async def pro_exposure_check(kind: str, r: ExposureCheck):
+    if kind not in ("email", "phone"):
+        raise HTTPException(404, "Unsupported exposure check")
+    try:
+        return await L.search(kind, r.query)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except httpx.HTTPError:
+        raise HTTPException(502, "The exposure provider could not be reached")
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.post("/api/pro/domain-check")
+async def pro_domain_check(r: DomainCheck):
+    try:
+        return await M.check_domain_safety(r.domain)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception:
+        raise HTTPException(502, "The domain could not be checked right now")
 
 
 @app.post("/api/otp/request")

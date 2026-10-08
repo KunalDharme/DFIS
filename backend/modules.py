@@ -2,6 +2,7 @@
 To add a tool: write a function, append it to REGISTRY. Group names follow the DFIS paper."""
 import asyncio, os, re, shutil
 import httpx
+from urllib.parse import urlparse
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 FREE = {"gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "live.com", "icloud.com", "proton.me", "protonmail.com"}
@@ -200,6 +201,67 @@ async def domain_intel(ctx):
         await ctx.emit("domain_intel", "crt.sh unavailable, subdomains skipped", "warn")
     ctx.domain_info = {"free": False, "spf": any("v=spf1" in t for t in txt), "dmarc": pol, "subdomains": len(subs)}
     await ctx.emit("domain_intel", f"SPF: {ctx.domain_info['spf']}, DMARC policy: {pol}, subdomains in certs: {len(subs)}", "ok")
+
+
+def normalize_domain(value):
+    value = value.strip().lower()
+    parsed = urlparse(value if "://" in value else "//" + value)
+    host = (parsed.hostname or "").rstrip(".")
+    if not host or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise ValueError("Enter a domain name, not a full URL or path")
+    if len(host) > 253 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", host):
+        raise ValueError("Enter a valid domain name")
+    labels = host.split(".")
+    if len(labels) < 2 or any(len(label) > 63 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label) for label in labels):
+        raise ValueError("Enter a valid domain name")
+    return host
+
+
+async def check_domain_safety(value):
+    domain = normalize_domain(value)
+    findings = []
+    async with httpx.AsyncClient(timeout=12, follow_redirects=True, verify=True) as client:
+        try:
+            response = await client.get("https://" + domain)
+            final_url = str(response.url)
+            findings.append({"label": "HTTPS connection", "value": "Available", "status": "good"})
+            findings.append({"label": "HTTP status", "value": str(response.status_code), "status": "good" if response.status_code < 400 else "warn"})
+            if final_url != "https://" + domain:
+                findings.append({"label": "Redirect destination", "value": final_url[:180], "status": "warn"})
+        except httpx.HTTPError as exc:
+            findings.append({"label": "HTTPS connection", "value": "Could not verify", "status": "bad"})
+            findings.append({"label": "Connection detail", "value": str(exc)[:180], "status": "warn"})
+
+    if domain in FREE:
+        findings.append({"label": "Domain type", "value": "Common free email provider", "status": "info"})
+        risk = 10
+    else:
+        import dns.resolver
+        def q(name, record):
+            try:
+                return [r.to_text() for r in dns.resolver.resolve(name, record, lifetime=6)]
+            except Exception:
+                return []
+        txt, dm = await asyncio.gather(asyncio.to_thread(q, domain, "TXT"),
+                                       asyncio.to_thread(q, "_dmarc." + domain, "TXT"))
+        dmarc = next((m.group(1) for t in dm if (m := re.search(r"p=(\w+)", t))), None)
+        spf = any("v=spf1" in t.lower() for t in txt)
+        findings.append({"label": "SPF", "value": "Configured" if spf else "Not found", "status": "good" if spf else "warn"})
+        findings.append({"label": "DMARC policy", "value": dmarc or "Not found", "status": "good" if dmarc in ("quarantine", "reject") else "warn"})
+        risk = 10 + (20 if not spf else 0) + (30 if not dmarc else 0) + (20 if dmarc == "none" else 0)
+    score = min(100, risk)
+    level = "High" if score >= 60 else "Moderate" if score >= 30 else "Low"
+    if level == "Low":
+        verdict = "No immediate warning signals found"
+        recommendation = "The checks completed successfully and did not identify a major configuration warning. You can continue, but still verify the domain and avoid entering sensitive information unless you trust the site."
+    elif level == "Moderate":
+        verdict = "Use caution before visiting"
+        recommendation = "One or more checks need attention. Confirm that this is the domain you intended to visit and avoid sharing sensitive information until you have verified it independently."
+    else:
+        verdict = "High-risk signals detected"
+        recommendation = "Review the warnings before visiting. Do not enter passwords, payment details, or personal information until the domain has been independently verified."
+    return {"domain": domain, "score": score, "level": level, "verdict": verdict, "recommendation": recommendation,
+            "findings": findings, "disclaimer": "Verdict based on HTTPS, redirect, SPF, and DMARC checks performed for this domain."}
 
 
 REGISTRY = [  # (module id, paper group, function)
