@@ -108,7 +108,27 @@ function DomainSafety(){
       h('p',{className:'small mute'},result.disclaimer)));
 }
 
-function ExposureSource({source}){
+function ProRemovalModal({kind,query,source,onClose}){
+  const [contact,setContact]=useState(''),[copied,setCopied]=useState(false);
+  const sourceName=source?.name||'the affected service';
+  const isEmail=kind==='email';
+  const request=`Subject: Request to delete personal data\n\nHello ${sourceName} privacy team,\n\nPlease delete personal data associated with ${query} from your service and confirm when completed. Please also tell me which data was removed and whether any further action is required.\n\nThank you.`;
+  const copy=async()=>{try{await navigator.clipboard.writeText(request);setCopied(true)}catch(e){setCopied(false)}};
+  const mailto=contact.trim()?`mailto:${contact.trim()}?subject=${encodeURIComponent('Request to delete personal data')}&body=${encodeURIComponent(request)}`:null;
+  useEffect(()=>{const close=e=>{if(e.key==='Escape')onClose()};document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close)},[onClose]);
+  return h('div',{className:'modal',onClick:onClose},h('div',{className:'box pro-removal-dialog',role:'dialog','aria-modal':true,onClick:e=>e.stopPropagation()},
+    h('h2',null,'Reduce exposure: ',sourceName),
+    h('p',{className:'sub'},isEmail?'This result identifies a reported exposure, not a live account. Request deletion from the original service or data controller.':'This result identifies a reported exposure. Remove the number from the original service, then protect your carrier and messaging accounts.'),
+    h('ol',null,
+      isEmail?h('li',{key:'email'},'Contact the original service privacy or support team and request deletion for ',h('strong',null,query),'.'):h('li',{key:'phone'},'Remove this number from old accounts, directories, and messaging profiles; ask each service to delete it.'),
+      isEmail?h('li',{key:'password'},'Change reused passwords and enable multi-factor authentication.'):h('li',{key:'mfa'},'Change reused passwords, review SMS recovery settings, and move important accounts to an authenticator app.'),
+      h('li',{key:'monitor'},'Keep the request or confirmation and monitor for continued exposure.')),
+    isEmail&&h('div',null,h('label',{className:'f',htmlFor:'privacy-contact'},'Privacy/support email (optional)'),h('input',{className:'in',id:'privacy-contact',type:'email',placeholder:'privacy@example.com',value:contact,onChange:e=>setContact(e.target.value)}),mailto&&h('a',{className:'btn sec sm pro-mailto',href:mailto},'Open email request')),
+    isEmail&&h('div',{className:'pro-request-box'},h('strong',null,'Request template'),h('pre',null,request),h('button',{className:'btn sec sm',onClick:copy},copied?'Copied request':'Copy request')),
+    h('button',{className:'auth-close',onClick:onClose},'Close')));
+}
+
+function ExposureSource({source,onRemove}){
   const escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const renderValue=([field,value])=>h('div',{className:'exposure-value',key:field},
     h('span',null,field),h('strong',null,value));
@@ -118,11 +138,12 @@ function ExposureSource({source}){
     h('div',{className:'domain-finding'},h('span',null,source.name),h('strong',null,source.records+' record'+(source.records===1?'':'s'))),
     source.info&&h('p',{className:'small mute'},source.info),
     source.fields.length>0&&h('div',{className:'exposure-fields'},h('strong',null,'Returned fields'),h('span',null,source.fields.join(' · '))),
-    source.samples.length>0&&h('div',{className:'exposure-samples'},source.samples.map(renderSample)));
+    source.samples.length>0&&h('div',{className:'exposure-samples'},source.samples.map(renderSample)),
+    h('button',{className:'btn sec sm exposure-remove',onClick:()=>onRemove(source)},'View removal steps'));
 }
 
 function ExposureCheck({kind,label,placeholder}){
-  const [query,setQuery]=useState(''),[result,setResult]=useState(null),[err,setErr]=useState(''),[busy,setBusy]=useState(false);
+  const [query,setQuery]=useState(''),[result,setResult]=useState(null),[err,setErr]=useState(''),[busy,setBusy]=useState(false),[removal,setRemoval]=useState(null);
   const check=async e=>{e.preventDefault();setErr('');setResult(null);setBusy(true);
     try{setResult(await post('/api/pro/exposure/'+kind,{query}))}catch(x){setErr(x.message)}setBusy(false)};
   const download=()=>{const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -139,8 +160,9 @@ function ExposureCheck({kind,label,placeholder}){
       h('div',{className:'err',role:'alert'},err)),
     result&&h('div',{className:'exposure-result'},
       h('div',{className:'domain-verdict '+(result.found?'high':'low')},h('strong',null,result.found?'Exposure indicators found':'No results found'),h('span',null,result.source_count+' sources · '+result.record_count+' records')),
-      result.found&&h('div',{className:'exposure-sources'},result.sources.map((source,index)=>h(ExposureSource,{source,key:index}))),
-      h('div',{className:'exposure-result-footer'},h('p',{className:'small mute'},result.notice),h('button',{className:'btn sec sm download-btn',onClick:download},'Download HTML report'))));
+      result.found&&h('div',{className:'exposure-sources'},result.sources.map((source,index)=>h(ExposureSource,{source,key:index,onRemove:setRemoval}))),
+      h('div',{className:'exposure-result-footer'},h('p',{className:'small mute'},result.notice),h('div',{className:'exposure-result-actions'},h('button',{className:'btn sec sm',onClick:()=>setRemoval({name:'all reported sources'})},'View removal guidance'),h('button',{className:'btn sec sm download-btn',onClick:download},'Download HTML report')))),
+    removal&&h(ProRemovalModal,{kind,query,source:removal,onClose:()=>setRemoval(null)}));
 }
 
 function Console({logs,chips,modules,running}){
