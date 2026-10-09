@@ -15,12 +15,13 @@ def _load_env():  # reads .env itself, so Windows users don't have to set variab
 
 
 _load_env()
-from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi import Cookie, FastAPI, HTTPException, Response, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import llm, modules as M, scoring as S
 import leakosint_provider as L
+import auth as A
 
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 app = FastAPI(title="DFIS")
@@ -30,6 +31,7 @@ otps, tokens = {}, {}
 @app.on_event("startup")
 async def startup():
     await S.load_jdm()
+    A.init_db()
 
 
 @app.on_event("shutdown")
@@ -53,12 +55,114 @@ class ExposureCheck(BaseModel):
     query: str
 
 
+class ProSignup(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+
+
+class ProLogin(BaseModel):
+    email: str
+    password: str
+
+
+class ChangePassword(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class DeleteAccount(BaseModel):
+    current_password: str
+
+
+def _require_pro_user(session_token):
+    user = A.get_user(session_token)
+    if not user:
+        raise HTTPException(401, "Sign in to a Pro account first")
+    return user
+
+
+def _set_session(response, raw_token):
+    response.set_cookie("dfis_pro_session", raw_token, httponly=True, samesite="lax",
+                        secure=os.getenv("COOKIE_SECURE", "0") == "1", max_age=30 * 86400)
+
+
+@app.post("/api/pro/auth/signup")
+async def pro_signup(r: ProSignup, response: Response):
+    try:
+        user = A.create_user(r.email, r.password, r.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    _set_session(response, A.create_session(user["id"]))
+    return {"user": user}
+
+
+@app.post("/api/pro/auth/login")
+async def pro_login(r: ProLogin, response: Response):
+    try:
+        user = A.authenticate(r.email, r.password)
+    except ValueError as e:
+        raise HTTPException(401, str(e))
+    _set_session(response, A.create_session(user["id"]))
+    return {"user": user}
+
+
+@app.get("/api/pro/auth/me")
+async def pro_me(dfis_pro_session: str | None = Cookie(default=None)):
+    return {"user": A.get_user(dfis_pro_session)}
+
+
+@app.post("/api/pro/auth/logout")
+async def pro_logout(response: Response, dfis_pro_session: str | None = Cookie(default=None)):
+    A.delete_session(dfis_pro_session)
+    response.delete_cookie("dfis_pro_session")
+    return {"ok": True}
+
+
+@app.post("/api/pro/auth/password")
+async def pro_change_password(r: ChangePassword, response: Response, dfis_pro_session: str | None = Cookie(default=None)):
+    user = _require_pro_user(dfis_pro_session)
+    try:
+        A.change_password(user["id"], r.current_password, r.new_password)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    response.delete_cookie("dfis_pro_session")
+    return {"ok": True, "message": "Password changed. Sign in again."}
+
+
+@app.delete("/api/pro/auth/account")
+async def pro_delete_account(r: DeleteAccount, response: Response, dfis_pro_session: str | None = Cookie(default=None)):
+    user = _require_pro_user(dfis_pro_session)
+    if not A.verify_password(user["id"], r.current_password):
+        raise HTTPException(400, "Current password is incorrect")
+    A.delete_user(user["id"])
+    response.delete_cookie("dfis_pro_session")
+    return {"ok": True}
+
+
+@app.get("/api/pro/history")
+async def pro_history(dfis_pro_session: str | None = Cookie(default=None)):
+    user = _require_pro_user(dfis_pro_session)
+    return {"items": A.get_history(user["id"])}
+
+
+@app.delete("/api/pro/history")
+async def pro_delete_history(dfis_pro_session: str | None = Cookie(default=None)):
+    user = _require_pro_user(dfis_pro_session)
+    A.delete_history(user["id"])
+    return {"ok": True}
+
+
 @app.post("/api/pro/exposure/{kind}")
-async def pro_exposure_check(kind: str, r: ExposureCheck):
+async def pro_exposure_check(kind: str, r: ExposureCheck, dfis_pro_session: str | None = Cookie(default=None)):
+    user = _require_pro_user(dfis_pro_session)
     if kind not in ("email", "phone"):
         raise HTTPException(404, "Unsupported exposure check")
     try:
-        return await L.search(kind, r.query)
+        result = await L.search(kind, r.query)
+        label = result["kind"] + ": " + ("*" * 3 + r.query[-4:] if kind == "phone" else r.query[:1] + "***" + r.query[r.query.index("@"):])
+        A.add_history(user["id"], kind, label, f"{result['record_count']} records across {result['source_count']} sources")
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
     except httpx.HTTPError:
@@ -68,9 +172,12 @@ async def pro_exposure_check(kind: str, r: ExposureCheck):
 
 
 @app.post("/api/pro/domain-check")
-async def pro_domain_check(r: DomainCheck):
+async def pro_domain_check(r: DomainCheck, dfis_pro_session: str | None = Cookie(default=None)):
+    user = _require_pro_user(dfis_pro_session)
     try:
-        return await M.check_domain_safety(r.domain)
+        result = await M.check_domain_safety(r.domain)
+        A.add_history(user["id"], "domain", result["domain"], f"{result['level']} risk ({result['score']}/100)")
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception:

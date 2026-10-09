@@ -6,17 +6,60 @@ const colour=r=>r>=70?'var(--bad)':r>=45?'var(--warn)':'var(--ok)';
 const level=r=>r>=76?'Critical risk':r>=51?'High risk':r>=26?'Moderate risk':'Low risk';
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(async r=>{const j=await r.json();if(!r.ok)throw new Error(j.detail||'Request failed');return j});
 
-function Header({theme,onTheme,onPremium}){
+function ProfileMenu({user,onLogout,onAction}){
+  const [open,setOpen]=useState(false),ref=useRef();
+  useEffect(()=>{const close=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};document.addEventListener('mousedown',close);return()=>document.removeEventListener('mousedown',close)},[]);
+  const initials=(user.name||user.email||'U').trim().slice(0,1).toUpperCase();
+  return h('div',{className:'profile-wrap',ref},
+    h('button',{className:'profile-button',onClick:()=>setOpen(!open),'aria-expanded':open,'aria-label':'Open profile menu'},h('span',{className:'avatar'},initials),h('span',{className:'profile-chevron'},open?'▴':'▾')),
+    open&&h('div',{className:'profile-menu',role:'menu'},
+      h('div',{className:'profile-summary'},h('strong',null,user.name||'DFIS Pro user'),h('span',null,user.email)),
+      h('button',{onClick:()=>{setOpen(false);onAction('settings')}},'Account settings'),
+      h('button',{onClick:()=>{setOpen(false);onAction('history')}},'Scan history'),
+      h('button',{onClick:()=>{setOpen(false);onAction('delete-history')}},'Delete history'),
+      h('button',{className:'profile-danger',onClick:()=>{setOpen(false);onAction('delete-account')}},'Delete account'),
+      h('button',{className:'profile-logout',onClick:()=>{setOpen(false);onLogout()}},'Log out')));
+}
+
+function Header({theme,onTheme,onPremium,user,onProfile}){
   return h('header',{className:'hdr'},h('div',{className:'wrap'},
     h('a',{className:'brand',href:'/','aria-label':'DFIS home'},
       h('span',{className:'logo'},h('svg',{viewBox:'0 0 24 24'},h('circle',{cx:11,cy:11,r:6}),h('path',{d:'M16 16l5 5'}))),'DFIS'),
     h('nav',{className:'nav','aria-label':'Primary'},h('a',{href:'#modules'},'Modules'),h('a',{href:'#why'},'Why DFIS')),
     h('span',{className:'sp'}),
     h('span',{className:'live'},h('i'),'System online'),
-    h('button',{className:'upgrade',onClick:onPremium,'aria-label':'Upgrade to Pro'},
+    !user&&h('button',{className:'upgrade',onClick:onPremium,'aria-label':'Upgrade to Pro'},
       h('svg',{viewBox:'0 0 24 24','aria-hidden':true},h('path',{d:'m12 3 2.35 4.76 5.25.76-3.8 3.7.9 5.23L12 15l-4.7 2.45.9-5.23-3.8-3.7 5.25-.76L12 3Z'})),
       h('span',{className:'upgrade-label'},'Upgrade to Pro')),
+    user&&h(ProfileMenu,{user,onLogout:()=>onProfile('logout'),onAction:onProfile}),
     h('button',{className:'btn sec sm',onClick:onTheme,'aria-label':theme==='dark'?'Switch to light theme':'Switch to dark theme'},theme==='dark'?'Light mode':'Dark mode')));
+}
+
+function ProfileDialog({kind,user,onClose,onAuth}){
+  const [current,setCurrent]=useState(''),[next,setNext]=useState(''),[message,setMessage]=useState(''),[err,setErr]=useState(''),[busy,setBusy]=useState(false),[historyItems,setHistoryItems]=useState([]);
+  useEffect(()=>{if(kind==='history')fetch('/api/pro/history').then(async r=>{const j=await r.json();if(!r.ok)throw new Error(j.detail||'Could not load history');setHistoryItems(j.items||[])}).catch(x=>setErr(x.message||'Could not load history'))},[kind]);
+  const action=async()=>{setErr('');setMessage('');setBusy(true);
+    try{
+      if(kind==='settings'){await post('/api/pro/auth/password',{current_password:current,new_password:next});onAuth(null);setMessage('Password changed. Please sign in again.')}
+      else if(kind==='delete-account'){if(!window.confirm('Delete your Pro account permanently?'))return;const r=await fetch('/api/pro/auth/account',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_password:current})});const j=await r.json();if(!r.ok)throw new Error(j.detail||'Request failed');onAuth(null);window.location.assign('/')}
+      else if(kind==='history'){const r=await fetch('/api/pro/history');const j=await r.json();if(!r.ok)throw new Error(j.detail||'Could not load history');setHistoryItems(j.items||[])}
+      else if(kind==='delete-history'){const r=await fetch('/api/pro/history',{method:'DELETE'});if(!r.ok)throw new Error('Could not delete history');setHistoryItems([]);setMessage('Saved scan history deleted.')}
+    }catch(x){setErr(x.message||'Request failed')}finally{setBusy(false)}};
+  if(kind==='logout'){post('/api/pro/auth/logout',{}).then(()=>onAuth(null));return null}
+  const title={settings:'Change password',history:'Scan history','delete-history':'Delete scan history','delete-account':'Delete account'}[kind];
+  return h('div',{className:'modal',onClick:onClose},h('div',{className:'box profile-dialog',role:'dialog','aria-modal':true,onClick:e=>e.stopPropagation()},
+    h('h2',null,title),
+    kind==='settings'&&h('div',null,h('p',{className:'sub'},'Update the password for ',user.email),h('label',{className:'f'},'Current password'),h('input',{className:'in',type:'password',value:current,onChange:e=>setCurrent(e.target.value)}),h('label',{className:'f'},'New password'),h('input',{className:'in',type:'password',minLength:10,value:next,onChange:e=>setNext(e.target.value)})),
+    kind==='delete-account'&&h('div',null,h('p',{className:'sub'},'This permanently removes your Pro account and active sessions. This cannot be undone.'),h('label',{className:'f'},'Current password'),h('input',{className:'in',type:'password',value:current,onChange:e=>setCurrent(e.target.value)})),
+    kind==='history'&&h('div',null,
+      h('p',{className:'sub'},historyItems.length?'Your recent Pro activity':'No saved Pro scans yet. Completed domain, email, and phone checks will appear here.'),
+      historyItems.length>0&&h('div',{className:'history-list'},historyItems.map(item=>h('div',{className:'history-item',key:item.id},
+        h('div',null,h('strong',null,item.kind),h('span',null,item.query_label)),
+        h('small',null,item.summary))))),
+    kind==='delete-history'&&h('p',{className:'sub'},'Remove all saved Pro scan records from your account.'),
+    h('div',{className:'err',role:'alert'},err),message&&h('p',{className:'profile-message'},message),
+    !message&&h('button',{className:'btn full '+(kind==='delete-account'?'danger-btn':''),onClick:action,disabled:busy},busy?'Please wait…':kind==='settings'?'Change password':kind==='history'?'Refresh history':kind==='delete-history'?'Delete history':'Delete account'),
+    h('button',{className:'auth-close',onClick:onClose},'Close')));
 }
 
 function ScanForm({onVerified,onCode}){
@@ -194,7 +237,31 @@ const PREMIUM_BENEFITS=[
   ['✓','Clearer decisions','See evidence, confidence, and practical next steps in one place.']
 ];
 
-function PremiumPage({onBack,onStartTrial}){
+function ProAuth({user,onAuth,onClose,onContinue}){
+  const [mode,setMode]=useState('login'),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[name,setName]=useState('');
+  const [err,setErr]=useState(''),[busy,setBusy]=useState(false);
+  const submit=async e=>{e.preventDefault();setErr('');setBusy(true);
+    try{const result=await post('/api/pro/auth/'+mode,{email,password,name});onAuth(result.user);setPassword('')}
+    catch(x){setErr(x.message)}setBusy(false)};
+  if(user)return h('div',{className:'modal',onClick:onClose},h('div',{className:'box pro-auth',role:'dialog','aria-modal':true,onClick:e=>e.stopPropagation()},
+    h('h2',null,'You are signed in'),h('p',{className:'sub'},user.email),
+    h('button',{className:'btn full',onClick:()=>{onClose();onContinue()}},'Continue to Pro'),
+    h('button',{className:'btn sec full',onClick:async()=>{await post('/api/pro/auth/logout',{});onAuth(null)}},'Sign out')));
+  return h('div',{className:'modal',onClick:onClose},h('div',{className:'box pro-auth',role:'dialog','aria-modal':true,onClick:e=>e.stopPropagation()},
+    h('div',{className:'premium-kicker'},'PRO ACCOUNT'),
+    h('h2',null,mode==='login'?'Sign in to your Pro account':'Create your Pro account'),
+    h('p',{className:'sub'},'Your account unlocks the free Pro development trial. No payment is required.'),
+    h('form',{onSubmit:submit},
+      mode==='signup'&&h('div',null,h('label',{className:'f',htmlFor:'pro-name'},'Name'),h('input',{className:'in',id:'pro-name',value:name,onChange:e=>setName(e.target.value),maxLength:100})),
+      h('label',{className:'f',htmlFor:'pro-email'},'Email address'),h('input',{className:'in',id:'pro-email',type:'email',required:true,value:email,onChange:e=>setEmail(e.target.value)}),
+      h('label',{className:'f',htmlFor:'pro-password'},'Password'),h('input',{className:'in',id:'pro-password',type:'password',required:true,minLength:10,value:password,onChange:e=>setPassword(e.target.value)}),
+      h('button',{className:'btn full',disabled:busy},busy?'Please wait…':mode==='login'?'Sign in':'Create account')),
+    h('div',{className:'err',role:'alert'},err),
+    h('button',{className:'auth-switch',onClick:()=>{setMode(mode==='login'?'signup':'login');setErr('')}},mode==='login'?'Need an account? Sign up':'Already registered? Sign in'),
+    h('button',{className:'auth-close',onClick:onClose},'Cancel')));
+}
+
+function PremiumPage({onBack,onStartTrial,user}){
   const comparisons=[
     ['Email exposure scan','Core checks','Expanded coverage'],
     ['Mobile number exposure','—','Planned Pro feature'],
@@ -282,6 +349,9 @@ function App(){
   const [result,setResult]=useState(null),[who,setWho]=useState({email:'',name:''});
   const [premiumPage,setPremiumPage]=useState(false);
   const [trialPage,setTrialPage]=useState(false);
+  const [proUser,setProUser]=useState(null);
+  const [authOpen,setAuthOpen]=useState(false);
+  const [profileDialog,setProfileDialog]=useState(null);
   const liveResultShown=useRef(false);
   const chipsRef=useRef({});chipsRef.current=chips;
   const log=(t,k='')=>setLogs(l=>[...l,{t,k}]);
@@ -294,6 +364,7 @@ function App(){
       l.push({t:'  llm: '+(hh.llm||'none (rule-based analysis)'),k:hh.llm?'ok':'warn'},{t:'waiting for a verified email'});
       setLogs(l);const c={};(hh.modules||[]).forEach(m=>c[m]={s:'idle'});setChips(c)}).catch(()=>{});
   },[]);
+  useEffect(()=>{fetch('/api/pro/auth/me').then(r=>r.json()).then(j=>setProUser(j.user)).catch(()=>{})},[]);
   const onCode=(email,dev)=>{log('verification code sent to '+email,'ok');if(dev)log('[dev mode] your code is '+dev,'warn')};
   const onVerified=(token,email,name)=>{setWho({email,name});setLogs([]);setResult(null);liveResultShown.current=false;setRunning(true);
     const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws/scan');
@@ -309,8 +380,9 @@ function App(){
       else if(d.type==='result'){setResult({...d,partial:false});setTimeout(()=>document.getElementById('results')?.scrollIntoView({behavior:'smooth'}),50)}};
     ws.onclose=()=>{setRunning(false);log('connection closed')};
     ws.onerror=()=>log('could not reach the scan server','err')};
-  return h(React.Fragment,null,h(Header,{theme,onTheme:toggle,onPremium:()=>setPremiumPage(true)}),
-    trialPage?h(ProTrialPage,{onBack:()=>setTrialPage(false)}):premiumPage?h(PremiumPage,{onBack:()=>setPremiumPage(false),onStartTrial:()=>{setPremiumPage(false);setTrialPage(true)}}):h(React.Fragment,null,
+  const profileAction=action=>{if(action==='logout'){post('/api/pro/auth/logout',{}).then(()=>{setProUser(null);setPremiumPage(false);setTrialPage(false);window.location.assign('/')})}else setProfileDialog(action)};
+  return h(React.Fragment,null,h(Header,{theme,onTheme:toggle,onPremium:()=>setAuthOpen(true),user:(premiumPage||trialPage)?proUser:null,onProfile:profileAction}),
+    trialPage?h(ProTrialPage,{onBack:()=>setTrialPage(false)}):premiumPage?h(PremiumPage,{onBack:()=>setPremiumPage(false),onStartTrial:()=>{setPremiumPage(false);setTrialPage(true)},user:proUser}):h(React.Fragment,null,
     h('main',{className:'wrap'},
       h('section',{className:'hero'},
         h('div',null,h('div',{className:'eyebrow'},h('span'),'Privacy intelligence platform'),h('h1',null,'Find the accounts you forgot you made.'),
@@ -320,7 +392,8 @@ function App(){
         h(Console,{logs,chips,modules,running})),
       result&&h(Results,{d:result,email:who.email,name:who.name}),
       h(Marketing)),
-    h(Footer)));
+    h(Footer)),authOpen&&h(ProAuth,{user:proUser,onAuth:user=>{setProUser(user);if(user){setAuthOpen(false);setPremiumPage(true)}},onClose:()=>setAuthOpen(false),onContinue:()=>setPremiumPage(true)}),
+    profileDialog&&h(ProfileDialog,{kind:profileDialog,user:proUser,onClose:()=>setProfileDialog(null),onAuth:user=>{setProUser(user);setPremiumPage(false);setTrialPage(false);setProfileDialog(null);if(!user)window.location.assign('/')}}));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(h(App));
 })();
