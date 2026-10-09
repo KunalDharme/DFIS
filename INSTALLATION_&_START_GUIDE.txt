@@ -47,14 +47,26 @@ ollama pull llama3.1:8b
 
 Copy-Item ".env.example" ".env"
 
-For native Windows mode, verify .env contains:
+For native Windows mode, edit .env so it contains:
 
 LLM_PROVIDER=ollama
 LLM_MODEL=llama3.1:8b
 LLM_BASE_URL=http://127.0.0.1:11434/v1
 DEV_SHOW_OTP=1
 
+The copied .env.example leaves LLM_BASE_URL commented for Docker use.
+Uncomment it and use the native Windows URL shown above.
+
 DEV_SHOW_OTP=1 is for local demonstration only. Keep the application private.
+
+Optional Pro exposure provider configuration:
+
+LEAKOSINT_TOKEN=your-local-leakosint-token
+
+LeakOSINT is the primary provider for Pro email and phone exposure checks.
+If the email provider fails or is unavailable, DFIS uses XposedOrNot as a
+metadata-only email fallback. The token is never sent to the browser. Phone
+checks continue to use LeakOSINT only.
 
 After installation, use the startup commands below.
 
@@ -113,6 +125,38 @@ WHAT THIS STARTS
 - MailAccess automatically during a scan on port 8001
 
 The OSINT tools do not need separate servers. DFIS launches them on demand.
+
+
+PRO FEATURES
+============
+
+The Pro experience is available as a free development trial. From the normal
+homepage, select Upgrade to Pro and sign in or create an account in the
+popup. Pro accounts use the local SQLite database at:
+
+backend\dfis_auth.sqlite3
+
+The Pro pages include:
+
+- Domain safety checks with HTTPS, redirects, SPF, DMARC, status, and risk signals
+- Email and phone exposure checks with redacted results
+- XposedOrNot fallback for failed email provider requests
+- Saved scan history and account controls
+- Removal guidance and downloadable redacted HTML reports
+
+The following routes are protected by Pro authentication:
+
+POST /api/pro/auth/signup
+POST /api/pro/auth/login
+POST /api/pro/auth/logout
+GET  /api/pro/auth/me
+GET  /api/pro/history
+POST /api/pro/domain-check
+POST /api/pro/exposure/email
+POST /api/pro/exposure/phone
+
+No payment gateway is active in the current development version. The Buy
+Premium button only displays an informational notice; use the Free Trial.
 
 
 VERIFY ALL COMPONENTS
@@ -179,7 +223,8 @@ Stop DFIS by pressing Ctrl+C in the DFIS terminal.
 
 If Ollama was started manually and should also be stopped:
 
-Get-Process ollama | Stop-Process
+Get-Process -Name ollama -ErrorAction SilentlyContinue |
+    ForEach-Object { Stop-Process -Id $_.Id }
 
 
 IMPORTANT CONFIGURATION
