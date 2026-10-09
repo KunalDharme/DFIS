@@ -212,6 +212,23 @@ function Results({d,email,name}){
       onStatus:v=>setSt({...st,[dl.domain]:v==='Not started'?'':v}),onClose:()=>setDl(null)}));
 }
 
+function ScanCompleteDialog({score,onClose}){
+  const risk=Number(score)||0;
+  const label=risk>=76?'Critical risk detected':risk>=51?'High risk detected':risk>=26?'Review risks found':'Low risk detected';
+  const tone=risk>=51?'bad':risk>=26?'warn':'good';
+  useEffect(()=>{const close=e=>{if(e.key==='Escape')onClose()};document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close)},[onClose]);
+  return h('div',{className:'modal scan-complete-modal',onClick:onClose},
+    h('div',{className:'box scan-complete-box',role:'dialog','aria-modal':true,'aria-labelledby':'scan-complete-title',onClick:e=>e.stopPropagation()},
+      h('button',{className:'scan-complete-close',onClick:onClose,'aria-label':'Close scan complete notification'},'×'),
+      h('div',{className:'scan-complete-icon '+tone},'✓'),
+      h('p',{className:'premium-kicker'},'SCAN COMPLETE'),
+      h('h2',{id:'scan-complete-title'},'Your results are ready'),
+      h('div',{className:'scan-complete-score'},risk+'/100'),
+      h('strong',{className:'scan-complete-label '+tone},label),
+      h('p',{className:'sub'},'You can now review your complete exposure report below.'),
+      h('button',{className:'btn full',onClick:onClose},'View my results')));
+}
+
 function DeleteModal({a,email,name,status,steps,onStatus,onClose}){
   const subj=encodeURIComponent('Request to erase my personal data');
   const body=encodeURIComponent(`Hello,\n\nI request erasure of all personal data linked to ${email} under Section 12 of India's Digital Personal Data Protection Act, 2023 (and GDPR Article 17 where it applies). Please confirm once deleted.\n\nThanks,\n${name||''}`);
@@ -352,6 +369,7 @@ function App(){
   const [proUser,setProUser]=useState(null);
   const [authOpen,setAuthOpen]=useState(false);
   const [profileDialog,setProfileDialog]=useState(null);
+  const [scanComplete,setScanComplete]=useState(null);
   const liveResultShown=useRef(false);
   const chipsRef=useRef({});chipsRef.current=chips;
   const log=(t,k='')=>setLogs(l=>[...l,{t,k}]);
@@ -366,7 +384,7 @@ function App(){
   },[]);
   useEffect(()=>{fetch('/api/pro/auth/me').then(r=>r.json()).then(j=>setProUser(j.user)).catch(()=>{})},[]);
   const onCode=(email,dev)=>{log('verification code sent to '+email,'ok');if(dev)log('[dev mode] your code is '+dev,'warn')};
-  const onVerified=(token,email,name)=>{setWho({email,name});setLogs([]);setResult(null);liveResultShown.current=false;setRunning(true);
+  const onVerified=(token,email,name)=>{setWho({email,name});setLogs([]);setResult(null);setScanComplete(null);liveResultShown.current=false;setRunning(true);
     const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws/scan');
     ws.onopen=()=>{setModules(Object.keys(chipsRef.current));ws.send(JSON.stringify({token}))};
     ws.onmessage=m=>{const d=JSON.parse(m.data);
@@ -377,7 +395,7 @@ function App(){
         setResult(d);
         if(!liveResultShown.current){liveResultShown.current=true;setTimeout(()=>document.getElementById('results')?.scrollIntoView({behavior:'smooth'}),50)}
       }
-      else if(d.type==='result'){setResult({...d,partial:false});setTimeout(()=>document.getElementById('results')?.scrollIntoView({behavior:'smooth'}),50)}};
+      else if(d.type==='result'){setResult({...d,partial:false});setScanComplete(d.S);setTimeout(()=>document.getElementById('results')?.scrollIntoView({behavior:'smooth'}),50)}};
     ws.onclose=()=>{setRunning(false);log('connection closed')};
     ws.onerror=()=>log('could not reach the scan server','err')};
   const profileAction=action=>{if(action==='logout'){post('/api/pro/auth/logout',{}).then(()=>{setProUser(null);setPremiumPage(false);setTrialPage(false);window.location.assign('/')})}else setProfileDialog(action)};
@@ -393,7 +411,8 @@ function App(){
       result&&h(Results,{d:result,email:who.email,name:who.name}),
       h(Marketing)),
     h(Footer)),authOpen&&h(ProAuth,{user:proUser,onAuth:user=>{setProUser(user);if(user){setAuthOpen(false);setPremiumPage(true)}},onClose:()=>setAuthOpen(false),onContinue:()=>setPremiumPage(true)}),
-    profileDialog&&h(ProfileDialog,{kind:profileDialog,user:proUser,onClose:()=>setProfileDialog(null),onAuth:user=>{setProUser(user);setPremiumPage(false);setTrialPage(false);setProfileDialog(null);if(!user)window.location.assign('/')}}));
+    profileDialog&&h(ProfileDialog,{kind:profileDialog,user:proUser,onClose:()=>setProfileDialog(null),onAuth:user=>{setProUser(user);setPremiumPage(false);setTrialPage(false);setProfileDialog(null);if(!user)window.location.assign('/')}}),
+    scanComplete!==null&&h(ScanCompleteDialog,{score:scanComplete,onClose:()=>setScanComplete(null)}));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(h(App));
 })();

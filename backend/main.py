@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import llm, modules as M, scoring as S
 import leakosint_provider as L
+import xposedornot_provider as X
 import auth as A
 
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -165,10 +166,16 @@ async def pro_exposure_check(kind: str, r: ExposureCheck, dfis_pro_session: str 
         return result
     except ValueError as e:
         raise HTTPException(400, str(e))
-    except httpx.HTTPError:
-        raise HTTPException(502, "The exposure provider could not be reached")
-    except RuntimeError as e:
-        raise HTTPException(503, str(e))
+    except (httpx.HTTPError, RuntimeError) as primary_error:
+        if kind != "email":
+            raise HTTPException(503, str(primary_error))
+        try:
+            result = await X.search_email(r.query)
+        except (httpx.HTTPError, RuntimeError) as backup_error:
+            raise HTTPException(503, "The primary and backup email exposure providers are unavailable") from backup_error
+        label = result["kind"] + ": " + r.query[:1] + "***" + r.query[r.query.index("@"):]
+        A.add_history(user["id"], kind, label, f"{result['record_count']} records across {result['source_count']} sources")
+        return result
 
 
 @app.post("/api/pro/domain-check")
