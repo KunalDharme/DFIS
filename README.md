@@ -15,6 +15,29 @@ The application is intended for email addresses that the person running the scan
 - Rule-based scoring with optional LLM-generated explanations and remediation steps.
 - A browser UI with live WebSocket progress, coverage notes, and deletion guidance.
 
+## Pro Development Trial
+
+DFIS Pro is currently available as a free development trial; no payment gateway
+is active. From the normal homepage, choose **Upgrade to Pro** to open the
+sign-in or sign-up dialog. Pro accounts use a local SQLite database and are
+separate from the normal OTP-based scan flow.
+
+Pro includes:
+
+- Domain safety checks covering HTTPS, redirects, SPF, DMARC, status, and risk signals.
+- Email and phone exposure checks with redacted metadata and sample records.
+- Saved scan history, account settings, password changes, and account deletion.
+- Removal guidance and downloadable redacted HTML reports.
+
+LeakOSINT is the primary provider for Pro email and phone exposure checks. If
+the email request fails, times out, or is unavailable, DFIS uses XposedOrNot
+as an email-only metadata fallback. Raw credentials, passwords, tokens, and
+unmasked personal records are not displayed. Phone checks continue to use
+LeakOSINT only.
+
+The Buy Premium button is informational during development and does not start
+a payment or subscription.
+
 ## Requirements
 
 ### All platforms
@@ -193,8 +216,15 @@ Do not commit `.env` or place API keys in source files. The LLM receives structu
 | `LLM_TIMEOUT` | LLM request timeout in seconds | `300` |
 | `DEV_SHOW_OTP` | Show the verification code in the UI for local development | `1` |
 | `MAILACCESS_PORT` | Local MailAccess port | `8001` |
+| `LEAKOSINT_TOKEN` | Local token for Pro email and phone exposure checks | empty |
+| `DFIS_AUTH_DB` | Optional path for the Pro SQLite database | `backend/dfis_auth.sqlite3` |
+| `COOKIE_SECURE` | Set to `1` only when serving over HTTPS | `0` |
 
 `DEV_SHOW_OTP=1` is for local development only. The application currently prints and returns the OTP because email delivery has not been wired in yet. Keep the app private while this setting is enabled.
+
+Keep `LEAKOSINT_TOKEN` in the local `.env` file only. Do not commit it or
+expose it to the frontend. XposedOrNot does not require a token for the
+email fallback.
 
 ## Scan Flow
 
@@ -231,11 +261,14 @@ To add an OSINT module, implement an async function in `backend/modules.py` and 
 
 ```text
 backend/
+  auth.py             Pro accounts, sessions, and scan history
   llm.py              Optional LLM integration
+  leakosint_provider.py Primary Pro exposure provider and redaction
   main.py             FastAPI application and WebSocket pipeline
   modules.py          OSINT modules and tool registry
   scoring.py          Score calculation and report aggregation
   requirements.txt    Python API dependencies
+  xposedornot_provider.py Email-only Pro fallback provider
 static/
   app.js              React UMD frontend
   index.html          Frontend entry point
@@ -244,6 +277,9 @@ Dockerfile             Container image definition
 docker-compose.yml      DFIS and optional Ollama services
 run_dfis.ps1            Windows launcher
 ```
+
+For the complete Windows installation, restart, verification, and shutdown
+steps, see [INSTALLATION_&_START_GUIDE.txt](INSTALLATION_&_START_GUIDE.txt).
 
 ## Troubleshooting
 
