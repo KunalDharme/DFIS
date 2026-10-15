@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 FREE = {"gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "live.com", "icloud.com", "proton.me", "protonmail.com"}
+IGNORED_ACCOUNT_DOMAINS = {"baby.ru"}
 _mailaccess_process = None
 _mailaccess_url = None
 
@@ -31,7 +32,10 @@ class Ctx:
         self.coverage = {}
 
     def hit(self, domain, source):
-        self.accounts.setdefault(domain.lower(), set()).add(source)
+        domain = domain.lower().strip(".")
+        if domain in IGNORED_ACCOUNT_DOMAINS or domain.startswith("aniworld."):
+            return
+        self.accounts.setdefault(domain, set()).add(source)
 
     def observe(self, module, line):
         stats = self.coverage.setdefault(module, {"checked": 0, "rate_limited": 0, "errors": 0})
