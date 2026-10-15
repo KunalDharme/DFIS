@@ -1,5 +1,5 @@
 """DFIS API. Run: uvicorn main:app --reload  (Python 3.11+)"""
-import asyncio, os, random, re, secrets, shutil, time
+import asyncio, os, random, re, secrets, shutil, smtplib, time
 import httpx
 
 
@@ -19,14 +19,14 @@ from fastapi import Cookie, FastAPI, HTTPException, Response, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import llm, modules as M, scoring as S
+import llm, modules as M, scoring as S, otp as O
 import leakosint_provider as L
 import xposedornot_provider as X
 import auth as A
 
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 app = FastAPI(title="DFIS")
-otps, tokens = {}, {}
+otps, tokens, pro_otps = {}, {}, {}
 
 
 @app.on_event("startup")
@@ -61,6 +61,19 @@ class ProSignup(BaseModel):
     password: str
     name: str = ""
 
+class ProOtpReq(BaseModel):
+    email: str
+
+class ProSignupVerify(BaseModel):
+    email: str
+    code: str
+    password: str
+    name: str = ""
+
+class ProResetVerify(BaseModel):
+    email: str
+    code: str
+    password: str
 
 class ProLogin(BaseModel):
     email: str
@@ -90,12 +103,73 @@ def _set_session(response, raw_token):
 
 @app.post("/api/pro/auth/signup")
 async def pro_signup(r: ProSignup, response: Response):
+    raise HTTPException(400, "Verify your email before creating a Pro account")
+
+
+@app.post("/api/pro/auth/signup/request")
+async def pro_signup_request(r: ProOtpReq):
+    email = r.email.strip().lower()
+    if not EMAIL.fullmatch(email):
+        raise HTTPException(400, "Enter a valid email address")
     try:
-        user = A.create_user(r.email, r.password, r.name)
+        with A._connect() as db:
+            if db.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
+                raise HTTPException(400, "An account with this email already exists")
+        pro_otps[("signup", email)] = O.issue(email, "signup")
+    except HTTPException:
+        raise
+    except (OSError, ValueError, smtplib.SMTPException) as e:
+        raise HTTPException(503, str(e)) from e
+    return {"dev_code": pro_otps[("signup", email)]["dev_code"]}
+
+
+@app.post("/api/pro/auth/signup/verify")
+async def pro_signup_verify(r: ProSignupVerify, response: Response):
+    email = r.email.strip().lower()
+    try:
+        record = pro_otps.get(("signup", email))
+        if not record:
+            raise ValueError("Request a new verification code")
+        O.verify(record, r.code)
+        user = A.create_user(email, r.password, r.name)
+        pro_otps.pop(("signup", email), None)
     except ValueError as e:
         raise HTTPException(400, str(e))
     _set_session(response, A.create_session(user["id"]))
     return {"user": user}
+
+
+@app.post("/api/pro/auth/password/request")
+async def pro_password_reset_request(r: ProOtpReq):
+    email = r.email.strip().lower()
+    if not EMAIL.fullmatch(email):
+        raise HTTPException(400, "Enter a valid email address")
+    try:
+        with A._connect() as db:
+            exists = db.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone()
+        if exists:
+            pro_otps[("password_reset", email)] = O.issue(email, "password_reset")
+            dev_code = pro_otps[("password_reset", email)]["dev_code"]
+        else:
+            dev_code = None
+    except (OSError, ValueError, smtplib.SMTPException) as e:
+        raise HTTPException(503, str(e)) from e
+    return {"message": "If an account exists, a reset code has been sent.", "dev_code": dev_code}
+
+
+@app.post("/api/pro/auth/password/verify")
+async def pro_password_reset_verify(r: ProResetVerify):
+    email = r.email.strip().lower()
+    try:
+        record = pro_otps.get(("password_reset", email))
+        if not record:
+            raise ValueError("Request a new verification code")
+        O.verify(record, r.code)
+        A.reset_password(email, r.password)
+        pro_otps.pop(("password_reset", email), None)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "message": "Password reset. You can sign in now."}
 
 
 @app.post("/api/pro/auth/login")
@@ -197,8 +271,15 @@ async def otp_request(r: OtpReq):
         raise HTTPException(400, "Enter a valid email address")
     code = f"{random.randint(0, 999999):06d}"
     otps[r.email.lower()] = (code, time.time() + 600)
-    print(f"[OTP] {r.email}: {code}")  # TODO: send via SMTP/Resend. Shown in the UI while DEV_SHOW_OTP=1
-    return {"dev_code": code if os.getenv("DEV_SHOW_OTP", "1") == "1" else None}
+    if os.getenv("DEV_SHOW_OTP", "1") == "1":
+        print(f"[OTP] {r.email}: {code}")
+        return {"dev_code": code}
+    try:
+        O.send_email(r.email.strip().lower(), code, "ownership")
+    except (OSError, ValueError, smtplib.SMTPException) as error:
+        otps.pop(r.email.lower(), None)
+        raise HTTPException(503, "Could not send the verification email. Check SMTP settings.") from error
+    return {"dev_code": None}
 
 
 @app.post("/api/otp/verify")

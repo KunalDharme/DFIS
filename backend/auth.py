@@ -139,6 +139,20 @@ def change_password(user_id, current_password, new_password):
         db.execute("DELETE FROM sessions WHERE user_id=? AND token_hash!=?", (user_id, ""))
 
 
+def reset_password(email, new_password):
+    email = email.strip().lower()
+    if len(new_password) < 10 or len(new_password) > 128:
+        raise ValueError("New password must be between 10 and 128 characters")
+    salt = secrets.token_bytes(16)
+    with _connect() as db:
+        user = db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+        if not user:
+            raise ValueError("Account not found")
+        db.execute("UPDATE users SET password_hash=?, password_salt=? WHERE id=?",
+                   (_password_hash(new_password, salt), salt.hex(), user["id"]))
+        db.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))
+
+
 def verify_password(user_id, password):
     with _connect() as db:
         user = db.execute("SELECT password_hash,password_salt FROM users WHERE id=?", (user_id,)).fetchone()

@@ -29,6 +29,23 @@ Pro includes:
 - Saved scan history, account settings, password changes, and account deletion.
 - Removal guidance and downloadable redacted HTML reports.
 
+### Pro email verification
+
+Pro signup and password reset require a six-character email OTP. Codes expire
+after five minutes and allow five attempts. For local development,
+`DEV_SHOW_OTP` controls only the normal scan ownership verification. Pro
+signup and password reset always send their OTP to the configured email
+address and never display it in the page. Configure a Gmail sender and app
+password:
+
+```env
+DFIS_EMAIL=your-gmail-address
+DFIS_APP_PASSWORD=your-gmail-app-password
+```
+
+The ownership email template is included for the future normal-page ownership
+flow, but that flow remains on the existing development OTP implementation.
+
 LeakOSINT is the primary provider for Pro email and phone exposure checks. If
 the email request fails, times out, or is unavailable, DFIS uses XposedOrNot
 as an email-only metadata fallback. Raw credentials, passwords, tokens, and

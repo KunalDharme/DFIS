@@ -280,26 +280,40 @@ const PREMIUM_BENEFITS=[
 ];
 
 function ProAuth({user,onAuth,onClose,onContinue}){
-  const [mode,setMode]=useState('login'),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[name,setName]=useState('');
-  const [err,setErr]=useState(''),[busy,setBusy]=useState(false);
-  const submit=async e=>{e.preventDefault();setErr('');setBusy(true);
-    try{const result=await post('/api/pro/auth/'+mode,{email,password,name});onAuth(result.user);setPassword('')}
-    catch(x){setErr(x.message)}setBusy(false)};
+  const [mode,setMode]=useState('login'),[step,setStep]=useState('form'),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[name,setName]=useState(''),[code,setCode]=useState('');
+  const [err,setErr]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
+  const submit=async e=>{e.preventDefault();setErr('');setMessage('');setBusy(true);
+    try{
+      if(mode==='login'){const result=await post('/api/pro/auth/login',{email,password,name});onAuth(result.user);setPassword('')}
+      else if(step==='form'){
+        const result=await post('/api/pro/auth/'+(mode==='signup'?'signup':'password')+'/request',{email});
+        setStep('code');setMessage('A verification code was sent to your email. Check your inbox to continue.');
+      }else{
+        const result=await post('/api/pro/auth/'+(mode==='signup'?'signup':'password')+'/verify',
+          mode==='signup'?{email,code,password,name}:{email,code,password});
+        if(mode==='signup')onAuth(result.user);else{setMode('login');setStep('form');setPassword('');setCode('');setMessage(result.message)}
+      }
+    }catch(x){setErr(x.message)}setBusy(false)};
+  const switchMode=next=>{setMode(next);setStep('form');setCode('');setPassword('');setErr('');setMessage('')};
   if(user)return h('div',{className:'modal',onClick:onClose},h('div',{className:'box pro-auth',role:'dialog','aria-modal':true,onClick:e=>e.stopPropagation()},
     h('h2',null,'You are signed in'),h('p',{className:'sub'},user.email),
     h('button',{className:'btn full',onClick:()=>{onClose();onContinue()}},'Continue to Pro'),
     h('button',{className:'btn sec full',onClick:async()=>{await post('/api/pro/auth/logout',{});onAuth(null)}},'Sign out')));
   return h('div',{className:'modal',onClick:onClose},h('div',{className:'box pro-auth',role:'dialog','aria-modal':true,onClick:e=>e.stopPropagation()},
     h('div',{className:'premium-kicker'},'PRO ACCOUNT'),
-    h('h2',null,mode==='login'?'Sign in to your Pro account':'Create your Pro account'),
-    h('p',{className:'sub'},'Your account unlocks the free Pro development trial. No payment is required.'),
+    h('h2',null,mode==='login'?'Sign in to your Pro account':mode==='signup'?'Create your Pro account':'Reset your Pro password'),
+    h('p',{className:'sub'},mode==='login'?'Sign in to continue to DFIS Pro.':step==='form'?'We will send a verification code before changing your account.':'Enter the code sent to '+email+'.'),
     h('form',{onSubmit:submit},
-      mode==='signup'&&h('div',null,h('label',{className:'f',htmlFor:'pro-name'},'Name'),h('input',{className:'in',id:'pro-name',value:name,onChange:e=>setName(e.target.value),maxLength:100})),
-      h('label',{className:'f',htmlFor:'pro-email'},'Email address'),h('input',{className:'in',id:'pro-email',type:'email',required:true,value:email,onChange:e=>setEmail(e.target.value)}),
-      h('label',{className:'f',htmlFor:'pro-password'},'Password'),h('input',{className:'in',id:'pro-password',type:'password',required:true,minLength:10,value:password,onChange:e=>setPassword(e.target.value)}),
-      h('button',{className:'btn full',disabled:busy},busy?'Please wait…':mode==='login'?'Sign in':'Create account')),
+      mode==='signup'&&step==='form'&&h('div',null,h('label',{className:'f',htmlFor:'pro-name'},'Name'),h('input',{className:'in',id:'pro-name',value:name,onChange:e=>setName(e.target.value),maxLength:100})),
+      h('label',{className:'f',htmlFor:'pro-email'},'Email address'),h('input',{className:'in',id:'pro-email',type:'email',required:true,value:email,disabled:step==='code',onChange:e=>setEmail(e.target.value)}),
+      mode==='login'&&h('label',{className:'f',htmlFor:'pro-password'},'Password'),mode==='login'&&h('input',{className:'in',id:'pro-password',type:'password',required:true,minLength:10,value:password,onChange:e=>setPassword(e.target.value)}),
+      mode!=='login'&&step==='code'&&h('div',null,h('label',{className:'f',htmlFor:'pro-code'},'Verification code'),h('input',{className:'in',id:'pro-code',required:true,maxLength:6,value:code,onChange:e=>setCode(e.target.value.toUpperCase())})),
+      mode!=='login'&&h('label',{className:'f',htmlFor:'pro-new-password'},mode==='signup'?'Password':'New password'),mode!=='login'&&h('input',{className:'in',id:'pro-new-password',type:'password',required:true,minLength:10,value:password,onChange:e=>setPassword(e.target.value)}),
+      h('button',{className:'btn full',disabled:busy},busy?'Please wait…':mode==='login'?'Sign in':step==='form'?'Send verification code':mode==='signup'?'Create account':'Reset password')),
     h('div',{className:'err',role:'alert'},err),
-    h('button',{className:'auth-switch',onClick:()=>{setMode(mode==='login'?'signup':'login');setErr('')}},mode==='login'?'Need an account? Sign up':'Already registered? Sign in'),
+    message&&h('p',{className:'profile-message'},message),
+    mode==='login'&&h('button',{className:'auth-switch',onClick:()=>switchMode('reset')},'Forgot password?'),
+    h('button',{className:'auth-switch',onClick:()=>switchMode(mode==='login'?'signup':'login')},mode==='login'?'Need an account? Sign up':'Already registered? Sign in'),
     h('button',{className:'auth-close',onClick:onClose},'Cancel')));
 }
 
